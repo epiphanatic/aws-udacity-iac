@@ -4,6 +4,14 @@ Parameters:
   EnvironmentName:
     Description: An environment name that will be prefixed to resource names
     Type: String
+    Default: 'Udagram'
+  UrlPrefix:
+    Description: Prefix for the URL
+    Type: String
+    Default: 'http://'
+  S3BucketName:
+    Description: S3 Bucket name
+    Type: String
 
 Resources:
   # need two security groups, one for the load balancer and one for the web servers
@@ -66,7 +74,7 @@ Resources:
           - DeviceName: '/dev/sdk'
             Ebs:
               VolumeSize: '10' # 10 GB
-        # defined below, allows access to resources such as S3
+        # defined below, allows access to resources, in this case S3
         IamInstanceProfile:
           Name: !Ref WebAppInstanceProfile
         # now apply the web server security group
@@ -198,9 +206,7 @@ Resources:
   S3Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      # appended student id and a bunch of random numbers to (hopefully) make it unique
-      BucketName: !Sub 'udagram-s3-bucket-2635189-8570238947520'
-      AccessControl: PublicRead
+      BucketName: !Sub '${S3BucketName}'
       VersioningConfiguration:
         Status: Enabled
       LifecycleConfiguration:
@@ -211,28 +217,32 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
       # add a tag to the bucket that mirrors tags used in network stack
       Tags:
         - Key: Name
           Value: !Ref EnvironmentName
-  # Not using atm, but this is how you would have more granular control over what is public and
-  #  what is not in the S3 bucket. Above is just making the entire bucket public which is fine
-  #  for now, but in the future you may want to make only certain files public and others private.
-  # S3BucketPolicy:
-  #   Type: AWS::S3::BucketPolicy
-  #   Properties:
-  #     Bucket: !Ref S3Bucket
-  #     PolicyDocument:
-  #       Statement:
-  #         - Sid: PublicReadAccess
-  #           Effect: Allow
-  #           Principal: '*'
-  #           Action:
-  #             - s3:GetObject
-  #           Resource: !Join ['', ['arn:aws:s3:::', !Ref MyS3Bucket, '/*']]
+
+  # attach bucket policy to make the bucket contents publicly readable (ie GetObject)
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadAccess
+            Effect: Allow
+            Principal: '*'
+            Action:
+              - s3:GetObject
+            Resource: !Join ['', ['arn:aws:s3:::', !Ref S3Bucket, '/*']]
 # Export the public URL (ie DNS name) of the LoadBalancer.
 # Add http:// in front of the load balancer DNS Name in the output, for convenience.
 Outputs:
   WebAppLB:
     Description: The public URL / DNS Name name of the load balancer with http in front
-    Value: !Join ['', !Sub ${UrlPrefix}, !GetAtt WebAppLB.DNSName]
+    Value: !Join ['', [!Sub UrlPrefix, !GetAtt WebAppLB.DNSName]]

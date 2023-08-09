@@ -1,6 +1,14 @@
 [
 	{
+        "ParameterKey": "EnvironmentName",
+        "ParameterValue": "Udagram"
+    },
+	{
 		"ParameterKey": "UrlPrefix",
 		"ParameterValue": "http://"
+	},
+	{
+		"ParameterKey": "S3BucketName",
+		"ParameterValue": "udagram-s3-bucket-2635189-8570238947520"
 	}
 ]
