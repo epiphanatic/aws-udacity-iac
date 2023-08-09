@@ -1,0 +1,243 @@
+Description: CD12352 - Infrastructure as Code Project - Udagram
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+
+Resources:
+  # need two security groups, one for the load balancer and one for the web servers
+  # load balancer security group will allow inbound port 80 from anywhere
+  LBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http access to our load balancer
+      VpcId:
+        # these intrinsic functions are how we import values from other stacks,
+        #  ie what were outputs from networking and infra stack
+        Fn::ImportValue: !Sub '${EnvironmentName}-VPCID'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      # notice that there is no egress - it will automatically allow all outbound traffic
+  # web server security group will allow inbound port 80 from the load balancer security group
+  #  and allow all outbound traffic
+  WebServerSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http access to our hosts from the LB Security Group
+      VpcId:
+        # here we are importing the VPC ID via intrinsic function
+        #  from the networking stack's VPC-> Export: -> Name:
+        Fn::ImportValue: !Sub '${EnvironmentName}-VPCID'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          # use the security group above
+          # this ingress says that port 80 traffic is ok as long as it is coming from
+          #  the load balancer security group
+          SourceSecurityGroupId: !Ref LBSecGroup
+      # this is the same as not having an egress, for demonstration purposes
+      # unlike the ingress, this allows all outbound traffic from the webservers
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+
+  # We include a portion of the LaunchTemplate resource so you can use the UserData.
+  WebAppLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash
+            apt-get update -y
+            sudo apt-get install nginx -y
+            service nginx start
+        # ubuntu 22 AMI with t2.micro instance type
+        ImageId: ami-02675d30b814d1daa
+        InstanceType: t2.micro
+        BlockDeviceMappings:
+          - DeviceName: '/dev/sdk'
+            Ebs:
+              VolumeSize: '10' # 10 GB
+        # defined below, allows access to resources such as S3
+        IamInstanceProfile:
+          Name: !Ref WebAppInstanceProfile
+        # now apply the web server security group
+        SecurityGroupIds:
+          - !Ref WebServerSecGroup
+
+  # allows access (read and write, ie GetObject and PutObject) to s3
+  WebAppInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-web-servers'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: s3
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                Resource:
+                  - !Sub 'arn:aws:s3:::any-bucket-name/*'
+
+  WebAppInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: '/'
+      Roles:
+        - !Ref WebAppInstanceRole
+
+  # autoscaling group resource that will use the launch template above to
+  #  spin up instances
+  WebAppGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      # import PrivateSubnets from networking stack
+      VPCZoneIdentifier:
+        - Fn::ImportValue: !Sub '${EnvironmentName}-PRIV-NETS'
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebAppLaunchTemplate
+        Version: !GetAtt WebAppLaunchTemplate.LatestVersionNumber
+      # number of instances will be between 1 and 3 but the autoscaling group
+      #  will try to keep it at 1
+      MinSize: '1'
+      DesiredCapacity: '1'
+      MaxSize: '3'
+      TargetGroupARNs:
+        # defined below - groups these instances and performs health checks
+        - Ref: WebAppTargetGroup
+
+  #  web app load balancer
+  WebAppLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+        # import public subnets from networking stack
+        - Fn::ImportValue: !Sub '${EnvironmentName}-PUB1-SN'
+        - Fn::ImportValue: !Sub '${EnvironmentName}-PUB2-SN'
+      SecurityGroups:
+        - Ref: LBSecGroup
+
+  # for receiving load balancer connections on specific ports
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: WebAppTargetGroup
+      LoadBalancerArn:
+        Ref: WebAppLB
+      Port: '80'
+      Protocol: HTTP
+  # for declaring specific behaviors in each listener, like forwarding to the AutoScaling group (WebAppTargetGroup)
+  ALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref 'WebAppTargetGroup'
+      # this is the condition that will be evaluated against the incoming request
+      #  to determine if it should be forwarded to the target group
+      # note that the path pattern could refer to specific routes, headers, parameters, etc.
+      #  and that the values field uses regex
+      # thus, this could get quite complex where you forward to different things based on
+      #  the incoming request
+      Conditions:
+        - Field: path-pattern
+          Values: [/]
+      ListenerArn: !Ref 'Listener'
+      Priority: 1
+
+  # A target group is a logical group of EC2 instances spanning across numerous subnets in a given VPC.
+  # You must explicitly register an EC2 instance with a target group (above),
+  #  after which it will be called a target.
+  # In our example, the autoscaling group manages all EC2 instances in the target group, meaning it will
+  #  automatically add/remove the instances to/from the target group.
+  WebAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      # ref: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticloadbalancingv2-targetgroup.html
+      # check the health of the instances every 10 seconds
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      # how long to wait before considering a health check to have failed
+      HealthCheckTimeoutSeconds: 8
+      # number of consecutive successful health checks before considering the instance healthy
+      HealthyThresholdCount: 2
+      # the port used when performing health checks
+      Port: 80
+      Protocol: HTTP
+      # the number of consecutive failed health checks before considering the instance unhealthy
+      UnhealthyThresholdCount: 5
+      VpcId:
+        Fn::ImportValue:
+          Fn::Sub: '${EnvironmentName}-VPCID'
+
+  # S3 bucket to store all static content for a web app
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # appended student id and a bunch of random numbers to (hopefully) make it unique
+      BucketName: !Sub 'udagram-s3-bucket-2635189-8570238947520'
+      AccessControl: PublicRead
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Status: 'Enabled'
+            NoncurrentVersionExpirationInDays: 10
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      # add a tag to the bucket that mirrors tags used in network stack
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+  # Not using atm, but this is how you would have more granular control over what is public and
+  #  what is not in the S3 bucket. Above is just making the entire bucket public which is fine
+  #  for now, but in the future you may want to make only certain files public and others private.
+  # S3BucketPolicy:
+  #   Type: AWS::S3::BucketPolicy
+  #   Properties:
+  #     Bucket: !Ref S3Bucket
+  #     PolicyDocument:
+  #       Statement:
+  #         - Sid: PublicReadAccess
+  #           Effect: Allow
+  #           Principal: '*'
+  #           Action:
+  #             - s3:GetObject
+  #           Resource: !Join ['', ['arn:aws:s3:::', !Ref MyS3Bucket, '/*']]
+# Export the public URL (ie DNS name) of the LoadBalancer.
+# Add http:// in front of the load balancer DNS Name in the output, for convenience.
+Outputs:
+  WebAppLB:
+    Description: The public URL / DNS Name name of the load balancer with http in front
+    Value: !Join ['', 'http://', !GetAtt WebAppLB.DNSName]

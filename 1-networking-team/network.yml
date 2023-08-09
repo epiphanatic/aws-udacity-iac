@@ -1,0 +1,295 @@
+Description: CD12352 - Infrastructure as Code Project - Network
+
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+
+  VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.0.0/24
+
+  PublicSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.1.0/24
+
+  PrivateSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
+    Type: String
+    Default: 10.0.2.0/24
+
+  PrivateSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
+    Type: String
+    Default: 10.0.3.0/24
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true
+      # Tags enable you to find your resources easier, ie there could be lots of VPCs
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+
+  # InternetGateway is so you can have inbound and outbound access to
+  #  your VPC
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+
+  # the internet gateway attachment attaches the internet gateway to the VPC
+  #  otherwise the internet gateway would sit there and do nothing
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      # the select function will pick something from a list that you provide
+      # here it is taking the first AZ from the list of AZs that are available in the region
+      # so if we are using us-east-1, the list of AZs would be something like
+      #   [us-east-1a, us-east-1b, us-east-1c]
+      # what we really pick here is not as important as just making sure that you
+      #  pick something different for each subnet
+      # The region is the last argument. If the region argument is empty (''),
+      #  the region in which the CloudFormation stack is created is assumed
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          # the !Sub function is just using string interpolation
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ1)
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Subnet (AZ2)
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      # the index in the select function is just taking the first AZ from the list
+      #  of AZs that are available in the region
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ1)
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Subnet (AZ2)
+
+  # EIP is elasitc IP address - ie a public ip that will never change
+  # otherwise ips can change for lots of reasons since resources are disposable,
+  #  and some things in might depend on the ip address
+  NatGateway1EIP:
+    Type: AWS::EC2::EIP
+    # DependsOn says that this resource cannot be created until some other resource
+    #  is created (in this case the internet gateway attachment), and so AWS will
+    #  wait until that resource is created before creating this one
+    #  However... CloudFormation automatically detects dependencies between resources and so
+    #   this isn't even necessary
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      # !GetAtt is a function that gets an attribute from a resource, ie the one we just created above
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
+      SubnetId: !Ref PublicSubnet1
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnet2
+
+  # ROUTING
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Public Routes
+
+  # first routing rule
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    # since trafic comes from the IGW, we need to make sure that the IGW is created first
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      # all addresses not in the vpc will be routed to the internet gateway
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # this associates the route table to the appropriate subnet
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  # using the same route table here but applying it to public subnet 2
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  # PRIVATE ROUTES AND SUBNETS
+  # Need one for each private subnet to route through respective NAT gateway
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Routes (AZ1)
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      # remember that all private subnets are routed through the NAT (network
+      #  address translation) gateway so that they don't have direct access to
+      #  the internet, ie it stays inside the VPC
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Private Routes (AZ2)
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
+
+# Outputs are for use by other script or files, ie when you create a VPC and
+#   need to know the id which is not available until the VPC is created, this
+#   is a way to capture that information and make it available to other scripts
+Outputs:
+  VPC:
+    Description: A reference to the created VPC
+    Value: !Ref VPC
+    Export:
+      # remember that exports are used to share resources between stacks,
+      #  so security group script will not work until this output has been created
+      #  since it references this output
+      Name: !Sub ${EnvironmentName}-VPCID
+
+  VPCPublicRouteTable:
+    Description: Public Routing
+    Value: !Ref PublicRouteTable
+    Export:
+      Name: !Sub ${EnvironmentName}-PUB-RT
+
+  VPCPrivateRouteTable1:
+    Description: Private Routing AZ1
+    Value: !Ref PrivateRouteTable1
+    Export:
+      Name: !Sub ${EnvironmentName}-PRI1-RT
+
+  VPCPrivateRouteTable2:
+    Description: Private Routing AZ2
+    Value: !Ref PrivateRouteTable2
+    Export:
+      Name: !Sub ${EnvironmentName}-PRI2-RT
+
+  PublicSubnets:
+    Description: A list of the public subnets
+    Value: !Join [',', [!Ref PublicSubnet1, !Ref PublicSubnet2]]
+    Export:
+      Name: !Sub ${EnvironmentName}-PUB-NETS
+
+  PrivateSubnets:
+    Description: A list of the private subnets
+    Value: !Join [',', [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+    Export:
+      Name: !Sub ${EnvironmentName}-PRIV-NETS
+
+  PublicSubnet1:
+    Description: A reference to the public subnet in the 1st Availability Zone
+    Value: !Ref PublicSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PUB1-SN
+
+  PublicSubnet2:
+    Description: A reference to the public subnet in the 2nd Availability Zone
+    Value: !Ref PublicSubnet2
+    Export:
+      Name: !Sub ${EnvironmentName}-PUB2-SN
+
+  PrivateSubnet1:
+    Description: A reference to the private subnet in the 1st Availability Zone
+    Value: !Ref PrivateSubnet1
+    Export:
+      Name: !Sub ${EnvironmentName}-PRI1-SN
+
+  PrivateSubnet2:
+    Description: A reference to the private subnet in the 2nd Availability Zone
+    Value: !Ref PrivateSubnet2
+    Export:
+      Name: !Sub ${EnvironmentName}-PRI2-SN
