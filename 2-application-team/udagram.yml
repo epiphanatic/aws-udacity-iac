@@ -211,11 +211,6 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        IgnorePublicAcls: true
-        BlockPublicPolicy: true
-        RestrictPublicBuckets: true
       # add a tag to the bucket that mirrors tags used in network stack
       Tags:
         - Key: Name
@@ -240,4 +235,4 @@ Resources:
 Outputs:
   WebAppLB:
     Description: The public URL / DNS Name name of the load balancer with http in front
-    Value: !Join ['', 'http://', !GetAtt WebAppLB.DNSName]
+    Value: !Join ['', !Sub ${UrlPrefix}, !GetAtt WebAppLB.DNSName]
