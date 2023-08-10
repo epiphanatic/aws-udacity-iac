@@ -2,6 +2,10 @@
 
 # Jason Simpson
 
+## Url for web page (temporary, for review purposes)
+
+http://udagr-webap-ry3v6yzse1o0-1978876134.us-east-1.elb.amazonaws.com/
+
 ## Spin up instructions
 
 1. Ensure you have the aws cli installed on your local machine and configured with your credentials
