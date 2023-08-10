@@ -1,0 +1,38 @@
+Parameters:
+  EnvironmentName:
+    Description: An environment name that will be prefixed to resource names
+    Type: String
+    Default: 'Udagram'
+  S3BucketName:
+    Description: S3 Bucket name
+    Type: String
+
+Resources:
+  # S3 bucket to store all static content for a web app
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      # add a tag to the bucket that mirrors tags used in network stack
+      Tags:
+        - Key: Name
+          Value: !Ref EnvironmentName
+
+  # attach bucket policy to make the bucket contents publicly readable (ie GetObject)
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowPublicRead
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:GetObject'
+            Resource: !Sub 'arn:aws:s3:::${S3Bucket}/*'

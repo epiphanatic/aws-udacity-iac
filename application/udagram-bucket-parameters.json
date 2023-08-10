@@ -1,0 +1,10 @@
+[
+    {
+		"ParameterKey": "S3BucketName",
+		"ParameterValue": "udagram-s3-bucket-2635189-8570238947520"
+	},
+    {
+        "ParameterKey": "EnvironmentName",
+        "ParameterValue": "Udagram"
+    }
+]

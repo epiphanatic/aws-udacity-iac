@@ -4,24 +4,28 @@
 
 ## Spin up instructions
 
-TODO
+1. Ensure you have the aws cli installed on your local machine and configured with your credentials
+
+2. From the root of the project cd into the network directory and run the following command to create the network stack:
+
+`./run.sh deploy us-east-1 UdagramNetwork network.yml network-parameters.json`
+
+3. After the network stack has been created, a bucket will need to be created first, then the local index.html file will need to be copied over to the bucket, then the application stack needs to be updated. To do this, cd into the application directory in the root of the project and run the following command to create the application stack:
+
+```
+./run.sh deploy us-east-1 UdagramApplication udagram-bucket.yml udagram-bucket-parameters.json &&
+aws s3 cp index.html s3://udagram-s3-bucket-2635189-8570238947520 &&
+./run.sh deploy us-east-1 UdagramApplication udagram.yml udagram-parameters.json
+```
 
 ## Tear down instructions
 
-TODO
+1. First delete the index.html file in the S3 bucket created by the application stack.
 
-## Other considerations
+2. Then, from the root of the project cd into the application directory and run the following command to delete the application stack:
 
-TODO (optional)
+`./run.sh delete us-east-1 UdagramApplication`
 
-Design your solution diagram using a tool of your choice and export it into an image file.
+3. After the application stack has been deleted, cd into the network directory back in the root of the project and run the following command to delete the network stack:
 
-Add all the CloudFormation networking resources and parameters to the network.yml and network-parameters.json files inside the starter folder of this repo.
-
-Add all the CloudFormation application resources and parameters to the udagram.yml and udagram-parameters.json files inside the starter folder of this repo.
-
-Create any required script files to automate spin up and tear down of the CloudFormation stacks.
-
-Update the README.md file in the starter folder with creation and deletion instructions, as well as any useful information regarding your solution.
-
-Submit your solution as a GitHub link or a zipped file containing the diagram image, CloudFormation yml and json files, automation scripts and README file.
+`./run.sh delete us-east-1 UdagramNetwork`

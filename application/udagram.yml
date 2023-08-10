@@ -12,6 +12,9 @@ Parameters:
   S3BucketName:
     Description: S3 Bucket name
     Type: String
+  ImageId:
+    Description: AMI ID
+    Type: String
 
 Resources:
   # need two security groups, one for the load balancer and one for the web servers
@@ -56,7 +59,6 @@ Resources:
           ToPort: 65535
           CidrIp: 0.0.0.0/0
 
-  # We include a portion of the LaunchTemplate resource so you can use the UserData.
   WebAppLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
@@ -66,9 +68,12 @@ Resources:
             #!/bin/bash
             apt-get update -y
             sudo apt-get install nginx -y
+            sudo apt-get install awscli -y
+            sudo chown -R /var/www/html
+            aws s3 cp s3://udagram-s3-bucket-2635189-8570238947520/index.html /var/www/html
             service nginx start
         # ubuntu 22 AMI with t2.micro instance type
-        ImageId: ami-02675d30b814d1daa
+        ImageId: !Ref ImageId
         InstanceType: t2.micro
         BlockDeviceMappings:
           - DeviceName: '/dev/sdk'
@@ -203,6 +208,10 @@ Resources:
           Fn::Sub: '${EnvironmentName}-VPCID'
 
   # S3 bucket to store all static content for a web app
+  # This was already done in the udagram-bucket .yml, but need it here otherwise
+  #  aws will try to delete it since it's not present here,
+  #  and the project instructions ask for exactly two stacks (otherwise I would just
+  #  create a separate stack for the bucket)
   S3Bucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -237,3 +246,50 @@ Outputs:
   WebAppLB:
     Description: The public URL / DNS Name name of the load balancer with http in front
     Value: !Join ['', [!Ref UrlPrefix, !GetAtt WebAppLB.DNSName]]
+# cut out TODOs
+# BastionHostPublicIp:
+#   Value: !GetAtt BastionHost.PublicIp
+#   Description: Public IP address of the Bastion Host
+# TODO
+# # bastion host for ssh access to private instances
+# # attach it to the first public subnet
+# # ensure that the key pair udacity-bastion-key-pair is created in the region
+# BastionHost:
+#   Type: AWS::EC2::Instance
+#   Properties:
+#     ImageId: !Ref ImageId
+#     InstanceType: t2.micro
+#     KeyName: udacity-bastion-key-pair
+#     SecurityGroupIds:
+#       - !Ref BastionSecurityGroup
+#     SubnetId:
+#       Fn::ImportValue: !Sub '${EnvironmentName}-PUB1-SN'
+
+# BastionSecurityGroup:
+#   Type: AWS::EC2::SecurityGroup
+#   Properties:
+#     GroupDescription: Bastion Host Security Group
+#     VpcId:
+#       Fn::ImportValue: !Sub '${EnvironmentName}-VPCID'
+#     SecurityGroupIngress:
+#       - IpProtocol: tcp
+#         FromPort: 22
+#         ToPort: 22
+#         CidrIp: 0.0.0.0/0
+
+# TODO
+# MyCloudFrontDistribution:
+#   Type: AWS::CloudFront::Distribution
+#   Properties:
+#     DistributionConfig:
+#       Origins:
+#         - DomainName: my-s3-bucket.s3.amazonaws.com
+#           Id: MyS3Origin
+#           S3OriginConfig:
+#             OriginAccessIdentity: ''
+#       DefaultCacheBehavior:
+#         TargetOriginId: MyS3Origin
+#         ForwardedValues:
+#           QueryString: false
+#         ViewerProtocolPolicy: redirect-to-https
+#       Enabled: true
