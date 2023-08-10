@@ -29,3 +29,7 @@ aws s3 cp index.html s3://udagram-s3-bucket-2635189-8570238947520 &&
 3. After the application stack has been deleted, cd into the network directory back in the root of the project and run the following command to delete the network stack:
 
 `./run.sh delete us-east-1 UdagramNetwork`
+
+## URL to the application
+
+For the url to the application, please see the output of the application stack in the AWS console.
