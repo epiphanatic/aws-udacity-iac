@@ -2,6 +2,10 @@
 
 # Jason Simpson
 
+## URL to the application
+
+http://Udagr-WebAp-14HC1A18RURTG-1365584226.us-east-1.elb.amazonaws.com
+
 ## Spin up instructions
 
 1. Ensure you have the aws cli installed on your local machine and configured with your credentials
@@ -29,7 +33,3 @@ aws s3 cp index.html s3://udagram-s3-bucket-2635189-8570238947520 &&
 3. After the application stack has been deleted, cd into the network directory back in the root of the project and run the following command to delete the network stack:
 
 `./run.sh delete us-east-1 UdagramNetwork`
-
-## URL to the application
-
-http://Udagr-WebAp-14HC1A18RURTG-1365584226.us-east-1.elb.amazonaws.com
