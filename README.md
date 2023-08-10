@@ -2,10 +2,6 @@
 
 # Jason Simpson
 
-## URL to the application
-
-http://Udagr-WebAp-14HC1A18RURTG-1365584226.us-east-1.elb.amazonaws.com
-
 ## Spin up instructions
 
 1. Ensure you have the aws cli installed on your local machine and configured with your credentials
